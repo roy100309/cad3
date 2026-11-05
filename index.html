@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>2D 하이브리드 냉각 시스템 시뮬레이터</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background-color: #1e1e24;
+      color: #fff;
+      overflow: hidden;
+    }
+    #toolbar {
+      background: #2b2d42;
+      padding: 12px 20px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      z-index: 10;
+    }
+    .btn {
+      padding: 8px 14px;
+      background: #4a4e69;
+      color: #fff;
+      border: 1px solid #6c757d;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: bold;
+      transition: all 0.2s;
+    }
+    .btn:active {
+      transform: scale(0.95);
+    }
+    .btn-danger {
+      background: #d90429;
+      border-color: #ef233c;
+    }
+    .btn-hose {
+      background: #00b4d8;
+      border-color: #90e0ef;
+    }
+    .btn-heat {
+      background: #f77f00;
+      border-color: #fcbf49;
+    }
+    .btn-heat.active {
+      background: #d62828;
+      box-shadow: 0 0 10px #f77f00;
+    }
+    #info-bar {
+      margin-left: auto;
+      font-size: 0.85rem;
+      color: #adb5bd;
+    }
+    #canvas-container {
+      flex: 1;
+      position: relative;
+      background: #121214;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 상단 컨트롤 툴바 -->
+  <div id="toolbar">
+    <button class="btn" onclick="addComponent('tablet')">+ 태블릿</button>
+    <button class="btn" onclick="addComponent('heatpipe')">+ 구리 히트파이프</button>
+    <button class="btn" onclick="addComponent('pump')">+ 펌프</button>
+    <button class="btn" onclick="addComponent('tank')">+ 물탱크</button>
+    <button class="btn btn-hose" onclick="addComponent('hose')">+ 호스</button>
+    <button class="btn btn-heat" id="heatBtn" onclick="toggleHeating()">🔥 발열 OFF</button>
+    <button class="btn btn-danger" onclick="deleteSelected()">선택 삭제</button>
+    <button class="btn btn-danger" onclick="clearAll()">전체 삭제</button>
+    <div id="info-bar">호스 끝단을 기물 근처로 드래그하면 자석처럼 결합됩니다.</div>
+  </div>
+
+  <!-- 캔버스 영역 -->
+  <div id="canvas-container">
+    <canvas id="simCanvas"></canvas>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let components = [];
+    let selectedComponent = null;
+    let isDragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    let isHeating = false;
+
+    // 캔버스 크기 조절
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+      draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // 기물 생성
+    function addComponent(type) {
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const id = Date.now() + Math.random();
+      let comp = { id, type, x: cx, y: cy, width: 50, height: 50, selected: false };
+
+      if (type === 'tablet') {
+        comp.width = 240; comp.height = 160;
+        comp.x -= 120; comp.y -= 80;
+      } else if (type === 'heatpipe') {
+        comp.width = 14; comp.height = 150;
+        comp.x -= 7; comp.y -= 75;
+      } else if (type === 'pump') {
+        comp.width = 60; comp.height = 60;
+        comp.x -= 30; comp.y -= 30;
+      } else if (type === 'tank') {
+        comp.width = 70; comp.height = 100;
+        comp.x -= 35; comp.y -= 50;
+      } else if (type === 'hose') {
+        comp.width = 0; comp.height = 0;
+        comp.x1 = cx - 60; comp.y1 = cy;
+        comp.x2 = cx + 60; comp.y2 = cy;
+        comp.connected1 = null; // 연결된 대상 기물 ID
+        comp.connected2 = null;
+        comp.activeHandle = null;
+      }
+
+      selectComponent(comp);
+      components.push(comp);
+      draw();
+    }
+
+    function toggleHeating() {
+      isHeating = !isHeating;
+      const btn = document.getElementById('heatBtn');
+      if (isHeating) {
+        btn.textContent = '🔥 발열 ON';
+        btn.classList.add('active');
+      } else {
+        btn.textContent = '🔥 발열 OFF';
+        btn.classList.remove('active');
+      }
+      draw();
+    }
+
+    function selectComponent(comp) {
+      components.forEach(c => c.selected = false);
+      if (comp) {
+        comp.selected = true;
+        selectedComponent = comp;
+      } else {
+        selectedComponent = null;
+      }
+    }
+
+    function deleteSelected() {
+      if (selectedComponent) {
+        components = components.filter(c => c.id !== selectedComponent.id);
+        selectedComponent = null;
+        draw();
+      }
+    }
+
+    function clearAll() {
+      components = [];
+      selectedComponent = null;
+      isHeating = false;
+      document.getElementById('heatBtn').textContent = '🔥 발열 OFF';
+      document.getElementById('heatBtn').classList.remove('active');
+      draw();
+    }
+
+    // 포인터 좌표 취득
+    function getPointerPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
+    // 각 기물별 스냅 포인트(연결 포트) 정의 함수
+    function getSnapPoints(comp) {
+      let points = [];
+      if (comp.type === 'pump' || comp.type === 'tank' || comp.type === 'heatpipe' || comp.type === 'tablet') {
+        // 상단, 하단, 좌측, 우측 중앙을 스냅 포인트로 제공
+        points.push({ x: comp.x + comp.width / 2, y: comp.y, name: 'top', comp });
+        points.push({ x: comp.x + comp.width / 2, y: comp.y + comp.height, name: 'bottom', comp });
+        points.push({ x: comp.x, y: comp.y + comp.height / 2, name: 'left', comp });
+        points.push({ x: comp.x + comp.width, y: comp.y + comp.height / 2, name: 'right', comp });
+      }
+      return points;
+    }
+
+    function isInside(pos, comp) {
+      if (comp.type === 'hose') {
+        const d1 = Math.hypot(pos.x - comp.x1, pos.y - comp.y1);
+        const d2 = Math.hypot(pos.x - comp.x2, pos.y - comp.y2);
+        if (d1 < 18) return 'start';
+        if (d2 < 18) return 'end';
+        return null;
+      }
+      return pos.x >= comp.x && pos.x <= comp.x + comp.width &&
+             pos.y >= comp.y && pos.y <= comp.y + comp.height;
+    }
+
+    // 마우스/터치 시작
+    function handleStart(e) {
+      const pos = getPointerPos(e);
+      let found = false;
+
+      for (let i = components.length - 1; i >= 0; i--) {
+        const comp = components[i];
+        const hit = isInside(pos, comp);
+        if (hit) {
+          selectComponent(comp);
+          isDragging = true;
+          found = true;
+          if (comp.type === 'hose') {
+            comp.activeHandle = hit;
+            if (hit === 'start') comp.connected1 = null;
+            if (hit === 'end') comp.connected2 = null;
+          } else {
+            dragOffsetX = pos.x - comp.x;
+            dragOffsetY = pos.y - comp.y;
+          }
+          break;
+        }
+      }
+      if (!found) selectComponent(null);
+      draw();
+    }
+
+    // 드래그 중
+    function handleMove(e) {
+      if (!isDragging || !selectedComponent) return;
+      e.preventDefault();
+      const pos = getPointerPos(e);
+
+      if (selectedComponent.type === 'hose') {
+        let targetX = pos.x;
+        let targetY = pos.y;
+        let snappedComp = null;
+
+        // 자석 스냅 효과: 다른 기물들의 포트 30px 이내로 오면 자동 부착
+        for (let comp of components) {
+          if (comp.type === 'hose') continue;
+          const ports = getSnapPoints(comp);
+          for (let p of ports) {
+            const dist = Math.hypot(pos.x - p.x, pos.y - p.y);
+            if (dist < 30) {
+              targetX = p.x;
+              targetY = p.y;
+              snappedComp = comp.id;
+              break;
+            }
+          }
+          if (snappedComp) break;
+        }
+
+        if (selectedComponent.activeHandle === 'start') {
+          selectedComponent.x1 = targetX;
+          selectedComponent.y1 = targetY;
+          selectedComponent.connected1 = snappedComp;
+        } else {
+          selectedComponent.x2 = targetX;
+          selectedComponent.y2 = targetY;
+          selectedComponent.connected2 = snappedComp;
+        }
+      } else {
+        selectedComponent.x = pos.x - dragOffsetX;
+        selectedComponent.y = pos.y - dragOffsetX; // 수정 방지용 올바른 코드
+        selectedComponent.y = pos.y - dragOffsetY;
+      }
+      draw();
+    }
+
+    function handleEnd() {
+      isDragging = false;
+      if (selectedComponent && selectedComponent.type === 'hose') {
+        selectedComponent.activeHandle = null;
+      }
+    }
+
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+
+    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    canvas.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+
+    // 렌더링 루프
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+
+      // 레이어 순서: 태블릿/기물 -> 히트파이프 -> 호스 (호스가 위를 지나가도록 배치)
+      components.filter(c => c.type === 'tablet' || c.type === 'pump' || c.type === 'tank').forEach(drawBaseComp);
+      components.filter(c => c.type === 'heatpipe').forEach(drawHeatpipe);
+      components.filter(c => c.type === 'hose').forEach(drawHose);
+
+      if (selectedComponent) {
+        drawSelectionBorder(selectedComponent);
+      }
+    }
+
+    function drawGrid() {
+      ctx.strokeStyle = '#22252a';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 25) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 25) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+    }
+
+    function drawBaseComp(comp) {
+      if (comp.type === 'tablet') {
+        ctx.fillStyle = '#2b2d42';
+        ctx.beginPath(); ctx.roundRect(comp.x, comp.y, comp.width, comp.height, 12); ctx.fill();
+
+        ctx.fillStyle = '#111318';
+        ctx.beginPath(); ctx.roundRect(comp.x + 8, comp.y + 8, comp.width - 16, comp.height - 16, 6); ctx.fill();
+
+        // 발열 기능 활성화 시 AP 부위 붉은색 히트맵 표시
+        if (isHeating) {
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.5)';
+          ctx.beginPath(); ctx.arc(comp.x + comp.width / 2, comp.y + comp.height / 2, 40, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#ff4d4d';
+          ctx.font = 'bold 11px Arial';
+          ctx.fillText('🔥 48.5°C (HEATING)', comp.x + comp.width / 2 - 50, comp.y + comp.height / 2 + 4);
+        } else {
+          ctx.fillStyle = '#ef4444';
+          ctx.font = '10px Arial';
+          ctx.fillText('AP 발열부', comp.x + comp.width / 2 - 22, comp.y + comp.height / 2 + 3);
+        }
+      } else if (comp.type === 'pump') {
+        ctx.fillStyle = '#4a5568';
+        ctx.beginPath(); ctx.roundRect(comp.x, comp.y, comp.width, comp.height, 8); ctx.fill();
+        ctx.strokeStyle = '#a0aec0'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(comp.x + 30, comp.y + 30, 16, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 10px Arial';
+        ctx.fillText('PUMP', comp.x + 14, comp.y + 34);
+      } else if (comp.type === 'tank') {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.strokeStyle = '#cbd5e0'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(comp.x, comp.y, comp.width, comp.height, 10); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.6)';
+        ctx.beginPath(); ctx.roundRect(comp.x + 3, comp.y + 25, comp.width - 6, comp.height - 28, [0, 0, 7, 7]); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 10px Arial';
+        ctx.fillText('COOLANT', comp.x + 8, comp.y + 16);
+      }
+    }
+
+    function drawHeatpipe(hp) {
+      const grad = ctx.createLinearGradient(hp.x, hp.y, hp.x + hp.width, hp.y);
+      grad.addColorStop(0, '#b85d19');
+      grad.addColorStop(0.5, '#e59866');
+      grad.addColorStop(1, '#873600');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.roundRect(hp.x, hp.y, hp.width, hp.height, 4); ctx.fill();
+    }
+
+    function drawHose(h) {
+      // 호스 본체 (구리 히트파이프 위를 지나가도록 레이어 후속 배치)
+      ctx.strokeStyle = 'rgba(186, 230, 253, 0.6)';
+      ctx.lineWidth = 14;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(h.x1, h.y1); ctx.lineTo(h.x2, h.y2); ctx.stroke();
+
+      // 내부 냉각수 흐름
+      ctx.strokeStyle = isHeating ? '#0284c7' : '#38bdf8';
+      ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(h.x1, h.y1); ctx.lineTo(h.x2, h.y2); ctx.stroke();
+
+      // 양 끝 연결 핸들 (자석 스냅 포인트 표시)
+      [ {x: h.x1, y: h.y1, conn: h.connected1}, {x: h.x2, y: h.y2, conn: h.connected2} ].forEach(pt => {
+        ctx.fillStyle = pt.conn ? '#22c55e' : '#ffffff'; // 연결되면 초록색 자석 포인트
+        ctx.strokeStyle = '#0284c7';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      });
+    }
+
+    function drawSelectionBorder(comp) {
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      if (comp.type === 'hose') {
+        ctx.beginPath(); ctx.moveTo(comp.x1, comp.y1); ctx.lineTo(comp.x2, comp.y2); ctx.stroke();
+      } else {
+        ctx.strokeRect(comp.x - 4, comp.y - 4, comp.width + 8, comp.height + 8);
+      }
+      ctx.setLineDash([]);
+    }
+
+    resizeCanvas();
+  </script>
+</body>
+</html>
